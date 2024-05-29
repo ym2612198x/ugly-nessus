@@ -533,6 +533,7 @@ def get_fqdns_from_nessus_file(nessus_file):
     index = 0
     # print(f"{INFO}[*] Searching for FQDNs{RST}")
     while index < len(report_hosts):
+        vprint(len(report_hosts))
         vprint(f"{OTHER}[*] Start of main loop{RST}")
         vprint(f"{OTHER}[*] Index: {index}/{len(report_hosts)-1}{RST}")
         report_host = report_hosts[index]
@@ -546,7 +547,7 @@ def get_fqdns_from_nessus_file(nessus_file):
             child_element_list = []
             # make a list of attribs so we can search for relevant ones
             for child_element in host_properties:
-                vprint(f"\t{child_element.attrib["name"]}")
+                vprint(f"\t{child_element.attrib['name']}")
                 child_element_list.append(child_element.attrib["name"])
             if "host-fqdn" in child_element_list:
                 vprint(f"{OTHER}[*] Checking host-fqdn{RST}")
@@ -740,7 +741,6 @@ def get_fqdns_from_nessus_file(nessus_file):
             if not found:
                 vprint(f"{BAD}[-] No FQDN found for {DETAIL}{host_name}{RST}")
                 fqdn_dict[host_name] = "No FQDN identified"
-                vprint(f"Host: {host_name}\t - FQDN: {fqdn_dict[host_name]}")
                 index += 1
                 continue
 
@@ -748,6 +748,8 @@ def get_fqdns_from_nessus_file(nessus_file):
         else:
             vprint(f"{OTHER}[+] Report host:\t{DETAIL}{host_name}{OTHER} (FQDN){RST}")
             fqdn_dict[host_name] = host_name
+            index += 1
+            continue
 
         vprint(f"Host: {host_name}\t - FQDN: {fqdn_dict[host_name]}")
     
@@ -790,7 +792,7 @@ def create_csv_data_and_fqdn_dict_from_xml_file(nessus_file):
             child_element_list = []
             # make a list of attribs so we can search for relevant ones
             for child_element in host_properties:
-                vprint(f"\t{child_element.attrib["name"]}")
+                vprint(f"\t{child_element.attrib['name']}")
                 child_element_list.append(child_element.attrib["name"])
             if "host-fqdn" in child_element_list:
                 vprint(f"{OTHER}[*] Checking host-fqdn{RST}")
@@ -992,6 +994,8 @@ def create_csv_data_and_fqdn_dict_from_xml_file(nessus_file):
         else:
             vprint(f"{OTHER}[+] Report host:\t{DETAIL}{host_name}{OTHER} (FQDN){RST}")
             fqdn_dict[host_name] = host_name
+            index += 1
+            continue
 
         vprint(f"Host: {host_name}\t - FQDN: {fqdn_dict[host_name]}")
 
@@ -1203,7 +1207,7 @@ def get_all_findings_from_csv_data(csv_data):
         findings_and_affected_hosts_dict[finding_name]["description"] = finding_desc
         findings_and_affected_hosts_dict[finding_name]["severity"] = finding_severity
         findings_and_affected_hosts_dict[finding_name]["output"] = finding_output
-        vprint(len(findings_and_affected_hosts_dict[finding_name]["affected"]))
+        vprint(len(findings_and_affected_hosts_dict[finding_name]['affected']))
 
     # create a unique list of findings sorted by severity as first order
     # then finding name as second order
