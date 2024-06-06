@@ -16,6 +16,7 @@ GREY = '\033[90m'
 OTHER = '\033[38;5;208m'
 
 
+# fuck you csv
 csv.field_size_limit(1000000)
 
 
@@ -40,7 +41,7 @@ skipped_findings = [
 arg_parser = argparse.ArgumentParser(description='Export vulnerabilities from a .nessus file.')
 arg_parser.add_argument('-i', '--input', required=True, help='Input filename')
 arg_parser.add_argument('-o', '--output', required=True, help='Output filename')
-arg_parser.add_argument('-I', '--info', help='Include INFO items', action='store_true')
+arg_parser.add_argument('-info', '--info', help='Include INFO items', action='store_true')
 arg_parser.add_argument('-d', '--desc', help='Include plugin description and output', action='store_true')
 arg_parser.add_argument('-v', '--verbose', help='Verbose output', action='store_true')
 args = arg_parser.parse_args()
@@ -86,7 +87,7 @@ def banner(input_file, output_file):
 def get_fqdns_from_csv_file(csv_input_filename):
 
     # this function tries to find fqdns for each host
-    # print(f"{INFO}[*] Searching for FQDNs{RST}")
+    print(f"{INFO}[*] Searching for FQDNs{RST}")
     with open(csv_input_filename, "r", encoding="utf-8") as csv_input_file:
         reader = csv.reader(csv_input_file)
         num_rows = sum(1 for row in reader)
@@ -531,9 +532,8 @@ def get_fqdns_from_nessus_file(nessus_file):
     report_hosts = root.findall('.//ReportHost')
     # this loop is for getting fqdn names for the hosts
     index = 0
-    # print(f"{INFO}[*] Searching for FQDNs{RST}")
+    print(f"{INFO}[*] Searching for FQDNs{RST}")
     while index < len(report_hosts):
-        vprint(len(report_hosts))
         vprint(f"{OTHER}[*] Start of main loop{RST}")
         vprint(f"{OTHER}[*] Index: {index}/{len(report_hosts)-1}{RST}")
         report_host = report_hosts[index]
@@ -547,7 +547,7 @@ def get_fqdns_from_nessus_file(nessus_file):
             child_element_list = []
             # make a list of attribs so we can search for relevant ones
             for child_element in host_properties:
-                vprint(f"\t{child_element.attrib['name']}")
+                vprint(f"\t{child_element.attrib["name"]}")
                 child_element_list.append(child_element.attrib["name"])
             if "host-fqdn" in child_element_list:
                 vprint(f"{OTHER}[*] Checking host-fqdn{RST}")
@@ -741,6 +741,7 @@ def get_fqdns_from_nessus_file(nessus_file):
             if not found:
                 vprint(f"{BAD}[-] No FQDN found for {DETAIL}{host_name}{RST}")
                 fqdn_dict[host_name] = "No FQDN identified"
+                vprint(f"Host: {host_name}\t - FQDN: {fqdn_dict[host_name]}")
                 index += 1
                 continue
 
@@ -748,8 +749,6 @@ def get_fqdns_from_nessus_file(nessus_file):
         else:
             vprint(f"{OTHER}[+] Report host:\t{DETAIL}{host_name}{OTHER} (FQDN){RST}")
             fqdn_dict[host_name] = host_name
-            index += 1
-            continue
 
         vprint(f"Host: {host_name}\t - FQDN: {fqdn_dict[host_name]}")
     
@@ -777,7 +776,7 @@ def create_csv_data_and_fqdn_dict_from_xml_file(nessus_file):
 
     # this loop is for getting fqdn names for the hosts
     index = 0
-    # print(f"{INFO}[*] Searching for FQDNs{RST}")
+    print(f"{INFO}[*] Searching for FQDNs{RST}")
     while index < len(report_hosts):
         vprint(f"{OTHER}[*] Start of main loop{RST}")
         vprint(f"{OTHER}[*] Index: {index}/{len(report_hosts)-1}{RST}")
@@ -792,7 +791,7 @@ def create_csv_data_and_fqdn_dict_from_xml_file(nessus_file):
             child_element_list = []
             # make a list of attribs so we can search for relevant ones
             for child_element in host_properties:
-                vprint(f"\t{child_element.attrib['name']}")
+                vprint(f"\t{child_element.attrib["name"]}")
                 child_element_list.append(child_element.attrib["name"])
             if "host-fqdn" in child_element_list:
                 vprint(f"{OTHER}[*] Checking host-fqdn{RST}")
@@ -994,8 +993,6 @@ def create_csv_data_and_fqdn_dict_from_xml_file(nessus_file):
         else:
             vprint(f"{OTHER}[+] Report host:\t{DETAIL}{host_name}{OTHER} (FQDN){RST}")
             fqdn_dict[host_name] = host_name
-            index += 1
-            continue
 
         vprint(f"Host: {host_name}\t - FQDN: {fqdn_dict[host_name]}")
 
@@ -1061,7 +1058,7 @@ def create_csv_data_and_fqdn_dict_from_xml_file(nessus_file):
             vprint(soon_to_be_csv)
             soon_to_be_csv_list.append(soon_to_be_csv)
 
-    # >:(
+    # fuck this!
     csv_data = '\n'.join(soon_to_be_csv_list)
     f = io.StringIO(csv_data)
     reader = csv.reader(f)
@@ -1207,7 +1204,7 @@ def get_all_findings_from_csv_data(csv_data):
         findings_and_affected_hosts_dict[finding_name]["description"] = finding_desc
         findings_and_affected_hosts_dict[finding_name]["severity"] = finding_severity
         findings_and_affected_hosts_dict[finding_name]["output"] = finding_output
-        vprint(len(findings_and_affected_hosts_dict[finding_name]['affected']))
+        vprint(len(findings_and_affected_hosts_dict[finding_name]["affected"]))
 
     # create a unique list of findings sorted by severity as first order
     # then finding name as second order
@@ -1394,9 +1391,9 @@ else:
     print(f"{BAD}[-] Invalid file type: {DETAIL}{args.input}{RST}")
 
 sorted_fqdn_dict = dict(sorted(fqdn_dict.items()))
-# for a, b in sorted_fqdn_dict.items():
-#     print(f"{a},{b}")
-
+for a, b in sorted_fqdn_dict.items():
+    print(f"{a},{b}")
+quit()
 # convert nessus XML data into csv
 csv_data, fqdn_dict = create_csv_data_and_fqdn_dict_from_xml_file(args.input)
 
