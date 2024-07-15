@@ -1110,6 +1110,7 @@ def print_findings(trimmed_findings):
     high = 0
     crit = 0
 
+    print("")
     for x,y in trimmed_findings.items():
         # get name
         name = x
