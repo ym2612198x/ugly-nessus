@@ -2,7 +2,7 @@
 
 usage: ugly-nessus.py [-h] -i INPUT -o OUTPUT [-I] [-d] [-v]
 
-Export vulnerabilities from a .nessus file.
+Export vulnerabilities from a Nessus .csv report file, and maybe also a .nessus file.
 
 Options:
 ```
