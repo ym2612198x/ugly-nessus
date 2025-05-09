@@ -540,8 +540,11 @@ def get_fqdns_from_csv_file(csv_input_filename):
     for item in fqdn_dict.values():
         if item != "No FQDN identified":
             not_eq +=1
-    percent = (not_eq / total) * 100
-    percent = round(percent, 1)
+    if not_eq != 0:
+        percent = (not_eq / total) * 100
+        percent = round(percent, 1)
+    else:
+        percent = 0
 
     return fqdn_dict, percent
 
@@ -1230,7 +1233,7 @@ if extension == ".csv":
     # sort the dict
     sorted_fqdn_dict = dict(sorted(fqdn_dict.items()))
     # then get the csv data
-    f = open(nessus_file, newline='')
+    f = open(nessus_file, newline='', encoding='utf-8')
     csv_data = csv.reader(f)
 
 # if nessus xml
