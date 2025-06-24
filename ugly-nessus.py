@@ -21,7 +21,6 @@ csv.field_size_limit(1000000)
 
 skipped_findings = [
     "Nessus Scan Information",
-    "Nessus SYN scanner",
     "Traceroute Information",
     "Common Platform Enumeration (CPE)",
     "ICMP Timestamp Request Remote Date Disclosure",
