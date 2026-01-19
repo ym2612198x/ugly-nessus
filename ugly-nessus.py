@@ -90,10 +90,471 @@ def banner(input_file, output_file, domain):
 
 def get_fqdns_from_csv_file(csv_input_filename):
 
+    # this function tries to find fqdns for each host
+    print(f"{INFO}[*] Searching for FQDNs in Nessus CSV file...{RST}")
+    with open(csv_input_filename, "r", encoding="utf-8") as csv_input_file:
+        reader = csv.reader(csv_input_file)
+        num_rows = sum(1 for row in reader)
+        # vprint(f"{INFO}Number of rows in input file: {DETAIL}{num_rows}{RST}")
+        # go back to start after row count
+        csv_input_file.seek(0)
+        # dict to store header indexes
+        # ie "Plugin ID = 1"
+        header_dict = {}
+        # dict to store hosts and fqdns
+        fqdn_dict = {}
+        # found variable
+        found = False
+        # get header
+        header = next(reader)
+        for index, title in enumerate(header):
+            header_dict[title] = index
+
+        # we need to find all the plugin ids that each host has
+        # so need to run through the rows and collect plugin ids until the host row no longer matches our host
+        host_and_assoc_plugins_dict = {}
+        for row in reader:
+            host = row[header_dict["Host"]]
+            plugin_id = row[header_dict["Plugin ID"]]
+            plugin_output = row[header_dict["Plugin Output"]]
+            # temp dict
+            foo = {}
+            try:
+                # if an entry for host already exists
+                # append the plugin id
+                foo[plugin_id] = plugin_output
+                host_and_assoc_plugins_dict[host].append(foo)
+            except:
+                # if it doesnt, create it
+                # then append plugin id
+                host_and_assoc_plugins_dict[host] = []
+                host_and_assoc_plugins_dict[host].append(foo)
+
+
+        # now loop through the dictionary we created
+        for host, plugins_info in host_and_assoc_plugins_dict.items():
+            found = False
+            vprint(f"{INFO}\n[*] Host: {DETAIL}{host}{RST}")
+            # check if already has a none empty fqdn dict entry
+            # if its in just go to next row
+            if host in fqdn_dict.keys() and fqdn_dict[host] != "No FQDN identified":
+                vprint(f"[+] {host} is already in fqdn dict: {DETAIL}{fqdn_dict[host]}{RST}")
+                # back to start of loop
+                continue
+            else:
+                vprint(f"[-] {host} is not in fqdn_dict")
+
+            # check if we have an ip or an fqdn
+            # if we have an fqdn already we dont need to search
+            ip_pattern = r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}'
+            ip_regex_match = re.fullmatch(ip_pattern, host)
+            if not ip_regex_match:
+                vprint(f"[+] {host} is already an fqdn, no need to search")
+                # add it to fqdn dict as itself
+                fqdn_dict[host] = host
+                # back to start of loop
+                continue
+            else:
+                vprint(f"[*] {host} is an IP")
+
+            plugin_id_list = []
+            for plugin_info in plugins_info:
+                found = False
+                for key, value in plugin_info.items():
+                    plugin_id_list.append(key)
+
+            plugin_id = "12053"
+            vprint(f"[*] First choice: Host Fully Qualified Domain Name (FQDN) Resolution ({plugin_id})")
+            # vprint(f"[*] Is {plugin_id} in plugin id list?")
+            for x in plugin_id_list:
+                # vprint(f"[?] {plugin_id} == {x}?")
+                if plugin_id != x:
+                    pass
+                    # vprint("[-] No")
+                else:
+                    # vprint("[+] Yes")
+                    for a in plugins_info:
+                        for b, c in a.items():
+                            if b ==  plugin_id:
+                                plugin_output = c
+                                break
+                    vprint(f"[*] Trying to get FQDN from {plugin_id}...")
+                    # vprint(plugin_output)
+                    try:
+                        plugin_output = plugin_output.split("resolves as ")[1]
+                        plugin_output = plugin_output.strip()
+                        plugin_output = plugin_output.lower()
+                        plugin_output = plugin_output[:-1]
+                        vprint(f"[+] Added {host} to fqdn dict: {plugin_output}")
+                        found = True
+                        fqdn_dict[host] = plugin_output
+                    except:
+                        print(f"{BAD}[-] Failure: {DETAIL}{plugin_id}{RST}")
+                        print(f"{INFO}[*] Raw plugin output:{RST}")
+                        print(f"{BAD}{plugin_output}{RST}")
+                        input(f"{INFO}[*] Press a key to continue{RST}")
+                    else:
+                        # If the plugin was found and fqdn_dict was updated, exit the loop
+                        vprint("[+] FQDN found")
+                        break
+            if found:
+                vprint("[+] Found is true so moving to next host")
+                continue
+
+            plugin_id = "108761"
+            vprint(f"[*] Second choice: MSSQL Host Information in NTLM SSP ({plugin_id})")
+            # vprint(f"[*] Is {plugin_id} in plugin id list?")
+            for x in plugin_id_list:
+                # vprint(f"[?] {plugin_id} == {x}?")
+                if plugin_id != x:
+                    # vprint("[-] No")
+                    pass
+                else:
+                    # vprint("[+] Yes")
+                    for a in plugins_info:
+                        for b, c in a.items():
+                            if b ==  plugin_id:
+                                plugin_output = c
+                                break
+                    vprint(f"[*] Trying to get FQDN from {plugin_id}...")
+                    # vprint(plugin_output)
+                    try:
+                        plugin_output = plugin_output.split("DNS Computer Name:")[1]
+                        plugin_output = plugin_output.split("\n")[0]
+                        plugin_output = plugin_output.strip()
+                        plugin_output = plugin_output.lower()
+                        vprint(f"added {host} to fqdn dict: {plugin_output}")
+                        found = True
+                        fqdn_dict[host] = plugin_output
+                    except:
+                        print(f"{BAD}[-] Failure: {DETAIL}{plugin_id}{RST}")
+                        print(f"{INFO}[*] Raw plugin output:{RST}")
+                        print(f"{BAD}{plugin_output}{RST}")
+                        input(f"{INFO}[*] Press a key to continue{RST}")
+                    else:
+                        # If the plugin was found and fqdn_dict was updated, exit the loop
+                        vprint("[+] FQDN found")
+                        break
+            if found:
+                vprint("[+] Found is true so moving to next host")
+                continue
+
+            plugin_id = "35371"
+            vprint(f"[*] Third choice: DNS Server hostname.bind Map Hostname Disclosure ({plugin_id})")
+            # vprint(f"[*] Is {plugin_id} in plugin id list?")
+            for x in plugin_id_list:
+                # vprint(f"[?] {plugin_id} == {x}?")
+                if plugin_id != x:
+                    # vprint("[-] No")
+                    pass
+                else:
+                    # vprint("[+] Yes")
+                    for a in plugins_info:
+                        for b, c in a.items():
+                            if b ==  plugin_id:
+                                plugin_output = c
+                                break
+                    vprint(f"[*] Trying to get FQDN from {plugin_id}...")
+                    # vprint(plugin_output)
+                    try:
+                        plugin_output = plugin_output.replace("\n","")
+                        plugin_output = plugin_output.split(" :")[1]
+                        plugin_output = plugin_output.strip()
+                        plugin_output = plugin_output.lower()
+                        vprint(f"added {host} to fqdn dict: {plugin_output}")
+                        found = True
+                        fqdn_dict[host] = plugin_output
+                    except:
+                        print(f"{BAD}[-] Failure: {DETAIL}{plugin_id}{RST}")
+                        print(f"{INFO}[*] Raw plugin output:{RST}")
+                        print(f"{BAD}{plugin_output}{RST}")
+                        input(f"{INFO}[*] Press a key to continue{RST}")
+                    else:
+                        # If the plugin was found and fqdn_dict was updated, exit the loop
+                        vprint("[+] FQDN found")
+                        break
+            if found:
+                vprint("[+] Found is true so moving to next host")
+                continue
+
+            plugin_id = "12218"
+            vprint(f"[*] Fourth choice: mDNS Detection ({plugin_id})")
+            # vprint(f"[*] Is {plugin_id} in plugin id list?")
+            for x in plugin_id_list:
+                # vprint(f"[?] {plugin_id} == {x}?")
+                if plugin_id != x:
+                    # vprint("[-] No")
+                    pass
+                else:
+                    # vprint("[+] Yes")
+                    for a in plugins_info:
+                        for b, c in a.items():
+                            if b ==  plugin_id:
+                                plugin_output = c
+                                break
+                    vprint(f"[*] Trying to get FQDN from {plugin_id}...")
+                    # vprint(plugin_output)
+                    try:
+                        plugin_output = plugin_output.split("mDNS hostname")[1]
+                        plugin_output = plugin_output.split(":")[1]
+                        plugin_output = plugin_output.split("\n")[0]
+                        plugin_output = plugin_output.strip()
+                        plugin_output = plugin_output.lower()
+                        plugin_output = plugin_output[:-1]
+                        vprint(f"added {host} to fqdn dict: {plugin_output}")
+                        found = True
+                        fqdn_dict[host] = plugin_output
+                    except:
+                        print(f"{BAD}[-] Failure: {DETAIL}{plugin_id}{RST}")
+                        print(f"{INFO}[*] Raw plugin output:{RST}")
+                        print(f"{BAD}{plugin_output}{RST}")
+                        input(f"{INFO}[*] Press a key to continue{RST}")
+                    else:
+                        # If the plugin was found and fqdn_dict was updated, exit the loop
+                        vprint("[+] FQDN found")
+                        break
+            if found:
+                vprint("[+] Found is true so moving to next host")
+                continue
+
+            plugin_id = "10785"
+            vprint(f"[*] Fifth choice: Microsoft Windows SMB NativeLanManager Remote System Information Disclosure ({plugin_id})")        
+            # vprint(f"[*] Is {plugin_id} in plugin id list?")
+            for x in plugin_id_list:
+                # vprint(f"[?] {plugin_id} == {x}?")
+                if plugin_id != x:
+                    pass
+                    # vprint("[-] No")
+                else:
+                    # vprint("[+] Yes")
+                    for a in plugins_info:
+                        for b, c in a.items():
+                            if b ==  plugin_id:
+                                plugin_output = c
+                                break
+                    vprint(f"[*] Trying to get FQDN from {plugin_id}...")
+                    # vprint(plugin_output)
+                    try:
+                        if "DNS Computer Name:" in plugin_output:
+                            plugin_output = plugin_output.split("DNS Computer Name:")[1]
+                            plugin_output = plugin_output.split("\n")[0]
+                            plugin_output = plugin_output.strip()
+                            plugin_output = plugin_output.lower()
+                            vprint(f"added {host} to fqdn dict: {plugin_output}")
+                            found = True
+                            fqdn_dict[host] = plugin_output
+                        elif "NetBIOS Computer Name" in plugin_output:
+                            plugin_output = plugin_output.split("NetBIOS Computer Name:")[1]
+                            plugin_output = plugin_output.split("\n")[0]
+                            plugin_output = plugin_output.strip()
+                            plugin_output = plugin_output.lower()
+                            vprint(f"added {host} to fqdn dict: {plugin_output}")
+                            found = True
+                            fqdn_dict[host] = plugin_output
+                        elif "The remote SMB Domain Name is" in plugin_output:
+                            plugin_output = plugin_output.split("The remote SMB Domain Name is : ")[1]
+                            plugin_output = plugin_output.split("\n")[0]
+                            plugin_output = plugin_output.strip()
+                            plugin_output = plugin_output.lower()
+                            vprint(f"added {host} to fqdn dict: {plugin_output}")
+                            found = True
+                            fqdn_dict[host] = plugin_output
+                    except:
+                        print(f"{BAD}[-] Failure: {DETAIL}{plugin_id}{RST}")
+                        print(f"{INFO}[*] Raw plugin output:{RST}")
+                        print(f"{BAD}{plugin_output}{RST}")
+                        input(f"{INFO}[*] Press a key to continue{RST}")
+                    else:
+                        # If the plugin was found and fqdn_dict was updated, exit the loop
+                        vprint("[+] FQDN found")
+                        break
+            if found:
+                vprint("[+] Found is true so moving to next host")
+                continue
+
+            plugin_id = "10150"
+            vprint(f"[*] Sixth choice: Windows NetBIOS / SMB Remote Host Information Disclosure ({plugin_id})") 
+            # vprint(f"[*] Is {plugin_id} in plugin id list?")
+            for x in plugin_id_list:
+                # vprint(f"[?] {plugin_id} == {x}?")
+                if plugin_id != x:
+                    # vprint("[-] No")
+                    pass
+                else:
+                    # vprint("[+] Yes")
+                    for a in plugins_info:
+                        for b, c in a.items():
+                            if b ==  plugin_id:
+                                plugin_output = c
+                                break
+                    vprint(f"[*] Trying to get FQDN from {plugin_id}...")
+                    # vprint(plugin_output)
+                    try:
+                        plugin_output = plugin_output.split("gathered :")[1]
+                        plugin_output = plugin_output.split(" = Computer name")[0]
+                        plugin_output = plugin_output.split("\n")[-1]
+                        plugin_output = plugin_output.strip()
+                        plugin_output = plugin_output.lower()
+                        vprint(f"added {host} to fqdn dict: {plugin_output}")
+                        found = True
+                        fqdn_dict[host] = plugin_output
+                    except:
+                        print(f"{BAD}[-] Failure: {DETAIL}{plugin_id}{RST}")
+                        print(f"{INFO}[*] Raw plugin output:{RST}")
+                        print(f"{BAD}{plugin_output}{RST}")
+                        input(f"{INFO}[*] Press a key to continue{RST}")
+                    else:
+                        # If the plugin was found and fqdn_dict was updated, exit the loop
+                        vprint("[+] FQDN found")
+                        break
+            if found:
+                vprint("[+] Found is true so moving to next host")
+                continue
+
+            plugin_id = "46180"
+            vprint(f"[*] Sixth choice: Additional DNS Hostnames ({plugin_id})") 
+            # vprint(f"[*] Is {plugin_id} in plugin id list?")
+            for x in plugin_id_list:
+                # vprint(f"[?] {plugin_id} == {x}?")
+                if plugin_id != x:
+                    # vprint("[-] No")
+                    pass
+                else:
+                    # vprint("[+] Yes")
+                    for a in plugins_info:
+                        for b, c in a.items():
+                            if b ==  plugin_id:
+                                plugin_output = c
+                                break
+                    vprint(f"[*] Trying to get FQDN from {plugin_id}...")
+                    # vprint(plugin_output)
+                    try:
+                        plugin_output = plugin_output.split("- ")[1]
+                        plugin_output = plugin_output.strip()
+                        plugin_output = plugin_output.lower()
+                        vprint(f"added {host} to fqdn dict: {plugin_output}")
+                        found = True
+                        fqdn_dict[host] = plugin_output
+                    except:
+                        print(f"{BAD}[-] Failure: {DETAIL}{plugin_id}{RST}")
+                        print(f"{INFO}[*] Raw plugin output:{RST}")
+                        print(f"{BAD}{plugin_output}{RST}")
+                        input(f"{INFO}[*] Press a key to continue{RST}")
+                    else:
+                        # If the plugin was found and fqdn_dict was updated, exit the loop
+                        vprint("[+] FQDN found")
+                        break
+            if found:
+                vprint("[+] Found is true so moving to next host")
+                continue
+
+            plugin_id = "45410"
+            vprint(f"[*] Seventh choice: SSL Certificate 'commonName' Mismatch ({plugin_id})") 
+            # vprint(f"[*] Is {plugin_id} in plugin id list?")
+            for x in plugin_id_list:
+                # vprint(f"[?] {plugin_id} == {x}?")
+                if plugin_id != x:
+                    # vprint("[-] No")
+                    pass
+                else:
+                    # vprint("[+] Yes")
+                    for a in plugins_info:
+                        for b, c in a.items():
+                            if b ==  plugin_id:
+                                plugin_output = c
+                                break
+                    vprint(f"[*] Trying to get FQDN from {plugin_id}...")
+                    # vprint(plugin_output)
+                    try:
+                        plugin_output = plugin_output.split(":")[1]
+                        plugin_output = plugin_output.split("\n")[0]
+                        plugin_output = plugin_output.strip()
+                        plugin_output = plugin_output.lower()
+                        # vprint(f"added {host} to fqdn dict: {plugin_output}")
+                        found = True
+                        fqdn_dict[host] = plugin_output
+                    except:
+                        print(f"{BAD}[-] Failure: {DETAIL}{plugin_id}{RST}")
+                        print(f"{INFO}[*] Raw plugin output:{RST}")
+                        print(f"{BAD}{plugin_output}{RST}")
+                        input(f"{INFO}[*] Press a key to continue{RST}")
+                    else:
+                        # If the plugin was found and fqdn_dict was updated, exit the loop
+                        vprint("[+] FQDN found")
+                        break
+            if found:
+                vprint("[+] Found is true so moving to next host")
+                continue
+
+            plugin_id = "10800"
+            vprint(f"[*] Eigth choice: SNMP Query System Information Disclosure ({plugin_id})") 
+            # vprint(f"[*] Is {plugin_id} in plugin id list?")
+            for x in plugin_id_list:
+                # vprint(f"[?] {plugin_id} == {x}?")
+                if plugin_id != x:
+                    # vprint("[-] No")
+                    pass
+                else:
+                    # vprint("[+] Yes")
+                    for a in plugins_info:
+                        for b, c in a.items():
+                            if b ==  plugin_id:
+                                plugin_output = c
+                                break
+                    vprint(f"[*] Trying to get FQDN from {plugin_id}...")
+                    # vprint(plugin_output)
+                    try:
+                        plugin_output = plugin_output.split("sysName")[1]
+                        plugin_output = plugin_output.split(":")[1]
+                        plugin_output = plugin_output.split("\n")[0]
+                        plugin_output = plugin_output.strip()
+                        plugin_output = plugin_output.lower()
+                        vprint(f"{GOOD}[+] Added {DETAIL}{host}{GOOD} to fqdn dict: {DETAIL}{plugin_output}{RST}")
+                        found = True
+                        fqdn_dict[host] = plugin_output
+                    except:
+                        print(f"{BAD}[-] Failure: {DETAIL}{plugin_id}{RST}")
+                        print(f"{INFO}[*] Raw plugin output:{RST}")
+                        print(f"{BAD}{plugin_output}{RST}")
+                        input(f"{INFO}[*] Press a key to continue{RST}")
+                    else:
+                        # If the plugin was found and fqdn_dict was updated, exit the loop
+                        vprint("{GOOD}[+] FQDN found{RST}")
+                        break
+            if found:
+                vprint("{GOOD}[+] Found is true so moving to next host{RST}")
+                continue
+
+            # if we reach here, no fqdn was found, so set key to "No FQDN identified"
+            # back to start of main loop
+            if not found:
+                fqdn_dict[host] = f"No FQDN identified"
+                vprint("")
+                vprint(f"{BAD}[-] No FQDN identified for: {DETAIL}{host}{RST}")
+                vprint(f"[*] Moving to next host")
+
+    # print fancy percentage thing
+    total = len(fqdn_dict)
+    not_eq = 0
+    for item in fqdn_dict.values():
+        if item != "No FQDN identified":
+            not_eq +=1
+    if not_eq != 0:
+        percent = (not_eq / total) * 100
+        percent = round(percent, 1)
+    else:
+        percent = 0
+
+    return fqdn_dict, percent
+
+
+def get_fqdns_from_csv_file(csv_input_filename):
+
     print(f"{INFO}[*] Searching for FQDNs in Nessus CSV file...{RST}")
 
     # plugin parsing functions
     plugin_parsers = {
+        "42410": lambda out: out.split("gathered :")[1].split(" = Computer name")[0].split("\n")[-1].strip().lower(),
         "12053": lambda out: out.split("resolves as ")[1].strip().lower().rstrip("."),
         "108761": lambda out: out.split("DNS Computer Name:")[1].split("\n")[0].strip().lower(),
         "35371": lambda out: out.replace("\n","").split(" :")[1].strip().lower(),
@@ -108,7 +569,11 @@ def get_fqdns_from_csv_file(csv_input_filename):
         "10150": lambda out: out.split("gathered :")[1].split(" = Computer name")[0].split("\n")[-1].strip().lower(),
         "46180": lambda out: out.split("- ")[1].strip().lower(),
         "45410": lambda out: out.split(":")[1].split("\n")[0].strip().lower(),
-        "10800": lambda out: out.split("sysName")[1].split(":")[1].split("\n")[0].strip().lower()
+        "10800": lambda out: out.split("sysName")[1].split(":")[1].split("\n")[0].strip().lower(),
+        "42981": lambda out: out.split("Subject          : CN=")[0].split("\n")[0].strip().lower(),
+        "83298": lambda out: out.split("Subject   : CN=")[0].split("\n")[0].strip().lower(),
+        "66717": lambda out: out.split("mDNS hostname       : ")[0].split("\n")[0].strip().lower(),
+        "10674": lambda out: out.split("ServerName   : ")[0].split("\n")[0].strip().lower()
     }
 
     fqdn_dict = {}
@@ -144,8 +609,7 @@ def get_fqdns_from_csv_file(csv_input_filename):
 
         found = False
         # try plugins in priority order
-        # 12053: Host FQDN Resolution
-        for plugin_id in ["12053","42410","108761","35371","12218","10150","46180","45410","10800","10785"]:
+        for plugin_id in ["42410", "12053","108761","35371","12218","10150","46180","45410","10800","10785", "42981", "83298", "66717", "10674"]:
             if plugin_id in plugins:
                 plugin_output = plugins[plugin_id]
                 vprint(f"[*] Trying to get FQDN from plugin {plugin_id}...")
@@ -172,256 +636,6 @@ def get_fqdns_from_csv_file(csv_input_filename):
 
     return fqdn_dict, percent
 
-
-def get_fqdns_from_nessus_file(nessus_file):
-
-    print(f"{INFO}[*] Searching for FQDNs in Nessus XML file...{RST}")
-    fqdn_dict = {}
-    # open nessus file and parse the xml
-    tree = etree.parse(nessus_file)
-    root = tree.getroot()
-    report_hosts = root.findall('.//ReportHost')
-    # this loop is for getting fqdn names for the hosts
-    index = 0
-    # vprint(f"{INFO}[*] Searching for FQDNs{RST}")
-    while index < len(report_hosts):
-        # vprint(len(report_hosts))
-        # vprint(f"{OTHER}[*] Start of main loop{RST}")
-        # vprint(f"{OTHER}[*] Index: {index}/{len(report_hosts)-1}{RST}")
-        report_host = report_hosts[index]
-        host_name = report_host.get("name")
-        ip_pattern = r'\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}'
-        ip_regex_match = re.fullmatch(ip_pattern, host_name)
-        if ip_regex_match:
-            # vprint(f"{OTHER}[+] Report host:\t{DETAIL}{host_name}{OTHER} (IP){RST}")
-            found = False
-            host_properties = report_host.find("HostProperties")
-            child_element_list = []
-            # make a list of attribs so we can search for relevant ones
-            for child_element in host_properties:
-                # vprint(f"\t{child_element.attrib['name']}")
-                child_element_list.append(child_element.attrib["name"])
-            if "host-fqdn" in child_element_list:
-                # vprint(f"{OTHER}[*] Checking host-fqdn{RST}")
-                for child in host_properties:
-                    if child.attrib["name"] == "host-fqdn":
-                        host_fqdn = child.text.lower()
-                        break
-                fqdn_dict[host_name] = host_fqdn
-                # vprint(f"{GOOD}[+] FOUND: FQDN for {DETAIL}{host_name}{GOOD} - {DETAIL}{host_fqdn}{GOOD} using {DETAIL}host-fqdn{RST}")
-                # vprint("[*] Breaking")
-                index += 1
-                found = True
-                continue
-            if "netbios-name" in child_element_list:
-                # vprint(f"[*] Checking netbios-name")
-                for child in host_properties:
-                    if child.attrib["name"] == "netbios-name":
-                        host_fqdn = child.text.lower()
-                        break
-                fqdn_dict[host_name] = host_fqdn
-                # vprint(f"{GOOD}[+] FOUND: FQDN for {DETAIL}{host_name}{GOOD} - {DETAIL}{host_fqdn}{GOOD} using {DETAIL}netbios-name{RST}")
-                # vprint("[*] Breaking")
-                index += 1
-                found = True
-                continue
-
-            # we reach here if no fqdn was found using hostproperties
-            # now we loop through specific plugin output
-            # vprint(f"{BAD}[-] FQDN not found in HostProperties{RST}")
-            plugin_items = report_host.findall("ReportItem")
-            for plugin in plugin_items:
-                # vprint(f"{OTHER}[*] Start of plugin loop{RST}")
-                # vprint(f"[*] Hostname: {host_name}")
-                # vprint(f"{OTHER}[*] Index: {index}/{len(report_hosts)-1}{RST}")
-                found = False
-                host_fqdn = ""
-                plugin_name = plugin.get("pluginName").replace("\n","")
-                plugin_id = plugin.get("pluginID")
-                # vprint(f"\t{plugin_name} - {plugin_id}")
-                if plugin_id == "35371":
-                    # DNS Server hostname.bind Map Hostname Disclosure - done
-                    finding_output = plugin.findall('plugin_output')[0].text
-                    try:
-                        finding_output = finding_output.replace("\n","")
-                        finding_output = finding_output.lower()
-                        host_fqdn = finding_output.split(" :")[1]
-                        if len(host_fqdn) != 0:
-                            # vprint(f"{GOOD}[+] FOUND: FQDN for {DETAIL}{host_name}{GOOD} - {DETAIL}{host_fqdn}{GOOD} using {DETAIL}{plugin_name}{RST}")
-                            fqdn_dict[host_name] = host_fqdn
-                            found = True
-                            index += 1
-                            # vprint("[*] Breaking")
-                            break
-                        else:
-                            # vprint(f"{BAD}[-] Error:{DETAIL} FQDN length {len(host_fqdn)} - {plugin_name}{RST}")
-                            # vprint(finding_output)
-                            pass
-                    except Exception as e:
-                        # vprint(f"{BAD}[-] Error:{DETAIL} {e} - {plugin_name}{RST}")
-                        # vprint(finding_output)
-                        pass
-
-                if plugin_id == "12218":
-                    # mDNS Detection - done
-                    finding_output = plugin.findall('plugin_output')[0].text
-                    try:
-                        for line in finding_output.split("\n"):
-                            if "mDNS hostname" in line:
-                                line = line.split(":")[1]
-                                line = line.strip()
-                                line = line.lower()
-                                break
-                        host_fqdn = line
-                        if len(host_fqdn) != 0:
-                            # vprint(f"{GOOD}[+] FOUND: FQDN for {DETAIL}{host_name}{GOOD} - {DETAIL}{host_fqdn}{GOOD} using {DETAIL}{plugin_name}{RST}")
-                            fqdn_dict[host_name] = host_fqdn
-                            found = True
-                            index += 1
-                            # vprint("[*] Breaking")
-                            break
-                        else:
-                            # vprint(f"{BAD}[-] Error:{DETAIL} FQDN length {len(host_fqdn)} - {plugin_name}{RST}")
-                            # vprint(finding_output)
-                            pass
-                    except Exception as e:
-                        # vprint(f"{BAD}[-] Error:{DETAIL} {e} - {plugin_name}{RST}")
-                        # vprint(finding_output)
-                        pass
-
-                if plugin_id == "10785":
-                    # Microsoft Windows SMB NativeLanManager Remote System Information Disclosure - done
-                    finding_output = plugin.findall('plugin_output')[0].text
-                    try:
-                        if "DNS Computer Name" in finding_output:
-                            finding_output = finding_output.split("DNS Computer Name: ")[1]
-                        elif "NetBIOS Computer Name" in finding_output:
-                            finding_output = finding_output.split("NetBIOS Computer Name:")[1]
-                        elif "The remote SMB Domain Name is" in finding_output:
-                            finding_output = finding_output.split("The remote SMB Domain Name is : ")[1]
-                        host_fqdn = finding_output.split("\n")[0].lower()
-                        if len(host_fqdn) != 0:
-                            # vprint(f"{GOOD}[+] FOUND: FQDN for {DETAIL}{host_name}{GOOD} - {DETAIL}{host_fqdn}{GOOD} using {DETAIL}{plugin_name}{RST}")
-                            fqdn_dict[host_name] = host_fqdn
-                            found = True
-                            index += 1
-                            # vprint("[*] Breaking")
-                            break
-                        else:
-                            # vprint(f"{BAD}[-] Error:{DETAIL} FQDN length {len(host_fqdn)} - {plugin_name}{RST}")
-                            # vprint(finding_output)
-                            pass
-                    except Exception as e:
-                        # vprint(f"{BAD}[-] Error:{DETAIL} {e} - {plugin_name}{RST}")
-                        # vprint(finding_output)
-                        pass
-
-                if plugin_id == "10150":
-                    # Windows NetBIOS / SMB Remote Host Information Disclosure - done
-                    finding_output = plugin.findall('plugin_output')[0].text
-                    try:
-                        for line in finding_output.split("\n"):
-                            if " = Computer name" in line:
-                                line = line.split(" = Computer name")[0]
-                                line = line.strip()
-                                line = line.lower()
-                                # break out of line loop
-                                break
-                        host_fqdn = line
-                        if len(host_fqdn) != 0:
-                            # vprint(f"{GOOD}[+] FOUND: FQDN for {DETAIL}{host_name}{GOOD} - {DETAIL}{host_fqdn}{GOOD} using {DETAIL}{plugin_name}{RST}")
-                            fqdn_dict[host_name] = host_fqdn
-                            found = True
-                            index += 1
-                            # vprint("[*] Breaking")
-                            break
-                        else:
-                            # vprint(f"{BAD}[-] Error:{DETAIL} FQDN length {len(host_fqdn)} - {plugin_name}{RST}")
-                            # vprint(finding_output)
-                            pass
-                    except Exception as e:
-                        # vprint(f"{BAD}[-] Error:{DETAIL} {e} - {plugin_name}{RST}")
-                        # vprint(finding_output)
-                        pass
-
-                if plugin_id == "46180":
-                    # Additional DNS Hostnames - done
-                    finding_output = plugin.findall('plugin_output')[0].text
-                    try:
-                        finding_output = finding_output.replace("\n", "")
-                        finding_output = finding_output.split("- ")[1].lower()
-                        host_fqdn = finding_output.strip()
-                        if len(host_fqdn) != 0:
-                            # vprint(f"{GOOD}[+] FOUND: FQDN for {DETAIL}{host_name}{GOOD} - {DETAIL}{host_fqdn}{GOOD} using {DETAIL}{plugin_name}{RST}")
-                            fqdn_dict[host_name] = host_fqdn
-                            found = True
-                            index += 1
-                            # vprint("[*] Breaking")
-                            break
-                        else:
-                            # vprint(f"{BAD}[-] Error:{DETAIL} FQDN length {len(host_fqdn)} - {plugin_name}{RST}")
-                            # vprint(finding_output)
-                            pass
-                    except Exception as e:
-                        # vprint(f"{BAD}[-] Error:{DETAIL} {e} - {plugin_name}{RST}")
-                        # vprint(finding_output)
-                        pass
-
-                if plugin_id == "10800":
-                    # SNMP Query System Information Disclosure - done
-                    finding_output = plugin.findall('plugin_output')[0].text
-                    try:
-                        for line in finding_output.split("\n"):
-                            if "sysName" in line:
-                                line = line.split(": ")[1]
-                                line = line.lower()
-                                line = line.strip()
-                                break
-                        host_fqdn = line
-                        if len(host_fqdn) != 0:
-                            # vprint(f"{GOOD}[+] FOUND: FQDN for {DETAIL}{host_name}{GOOD} - {DETAIL}{host_fqdn}{GOOD} using {DETAIL}{plugin_name}{RST}")
-                            fqdn_dict[host_name] = host_fqdn
-                            found = True
-                            index += 1
-                            # vprint("[*] Breaking")
-                            break
-                        else:
-                            # vprint(f"{BAD}[-] Error:{DETAIL} FQDN length {len(host_fqdn)} - {plugin_name}{RST}")
-                            # vprint(finding_output)
-                            pass
-                    except Exception as e:
-                        # vprint(f"{BAD}[-] Error:{DETAIL} {e} - {plugin_name}{RST}")
-                        # vprint(finding_output)
-                        pass
-    
-            # if we cant find an fqdn, just set it to ip
-            if not found:
-                # vprint(f"{BAD}[-] No FQDN found for {DETAIL}{host_name}{RST}")
-                fqdn_dict[host_name] = "No FQDN identified"
-                #input()
-                index += 1
-                continue
-
-        # if the hostname is already an fqdn, just add itself as an entry
-        else:
-            # vprint(f"{OTHER}[+] Report host:\t{DETAIL}{host_name}{OTHER} (FQDN){RST}")
-            fqdn_dict[host_name] = host_name
-            index += 1
-            continue
-
-        # vprint(f"Host: {host_name}\t - FQDN: {fqdn_dict[host_name]}")
-    
-    # print fancy percentage thing
-    total = len(fqdn_dict)
-    not_eq = 0
-    for item in fqdn_dict.values():
-        if item != "No FQDN identified":
-            not_eq +=1
-    percent = (not_eq / total) * 100
-    percent = round(percent, 1)
-    #print(f"{INFO}[*] Percentage of FQDNs identified: {DETAIL}{round(percent, 1)}%{RST}")
-
-    return fqdn_dict, percent
 
 
 def create_csv_data_from_nessus_file(nessus_file):
