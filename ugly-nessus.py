@@ -3,7 +3,7 @@ import re
 import argparse
 import os
 import io
-import xml.etree.ElementTree as etree
+import sys
 
 
 # colours
@@ -16,10 +16,12 @@ GREY = '\033[90m'
 OTHER = '\033[38;5;208m'
 
 
+# just csv things
 csv.field_size_limit(1000000)
 
 
-skipped_findings = [
+# skipped findings list
+skipped_findings = {
     "Nessus Scan Information",
     "Traceroute Information",
     "Common Platform Enumeration (CPE)",
@@ -27,12 +29,10 @@ skipped_findings = [
     "OS Identification Failed",
     "Open Port Re-check",
     "Do not scan printers",
-    "ICMP Timestamp Request Remote Date Disclosure",
     "Device Type",
     "DCE Services Enumeration",
     "Service Detection (GET request)"
-    ]
-
+}
 
 
 # args
@@ -42,13 +42,12 @@ arg_parser.add_argument('-o', '--output', required=True, help='Output filename')
 arg_parser.add_argument('-I', '--info', help='Include INFO items', action='store_true')
 arg_parser.add_argument('-O', '--poutput', help='Include plugin output', action='store_true')
 arg_parser.add_argument('-d', '--desc', help='Include plugin description', action='store_true')
-arg_parser.add_argument('-D', '--domain', help='Append this value to incomplete FQDNs (ie. machine1 becomes machine1.domain.local)')
 arg_parser.add_argument('-x', '--ip', help='Include extra info for hosts (ip address or "No FQDN found")', action='store_true')
+arg_parser.add_argument('-C', '--cve', help='Include CVE column in output', action='store_true')
 arg_parser.add_argument('-v', '--verbose', help='Verbose output', action='store_true')
 args = arg_parser.parse_args()
 nessus_file = args.input
 output_file = args.output
-domain = args.domain
 
 
 def vprint(text):
@@ -63,7 +62,7 @@ def vinput():
         input("Press a key to continue: ")
 
 
-def banner(input_file, output_file, domain):
+def banner(input_file, output_file): # domain
 
     print(f"""{BAD}
          __   __  _______  ___      __   __         __    _  _______  _______  _______  __   __  _______ 
@@ -73,7 +72,7 @@ def banner(input_file, output_file, domain):
         |       ||   ||  ||   |___ |_     _|       |  _    ||    ___||_____  ||_____  ||       ||_____  |
         |       ||   |_| ||       |  |   |         | | |   ||   |___  _____| | _____| ||       | _____| |
         |_______||_______||_______|  |___|         |_|  |__||_______||_______||_______||_______||_______|
-        {RST} v3.2c (via vie dnsdump.exe stars align rpc dcc)
+        {RST} v4.0 (v&c 2.0)
 
         
         {INFO}[*] In file:\t{DETAIL}{input_file}{RST}
@@ -82,17 +81,18 @@ def banner(input_file, output_file, domain):
         {INFO}[*] Desc:\t{DETAIL}{args.desc}{RST}
         {INFO}[*] Extra:\t{DETAIL}{args.ip}{RST}
         {INFO}[*] Output:\t{DETAIL}{args.poutput}{RST}
+        {INFO}[*] CVE(s):\t{DETAIL}{args.cve}{RST}
         {INFO}[*] Verbose:\t{DETAIL}{args.verbose}{RST}
-        {INFO}[*] Domain:\t{DETAIL}{domain}{RST}
 
         """)
 
 
 def get_fqdns_from_csv_file(csv_input_filename):
 
+    # search the csv for fqdns and hostnames to match with ip addresses
     print(f"{INFO}[*] Searching for FQDNs in Nessus CSV file...{RST}")
 
-    # plugin parsing functions
+    # plugin parsing functions - these are the only ones ive identified that reveal a hostname
     plugin_parsers = {
         "42410": lambda out: out.split("gathered :")[1].split(" = Computer name")[0].split("\n")[-1].strip().lower(),
         "12053": lambda out: out.split("resolves as ")[1].strip().lower().rstrip("."),
@@ -116,6 +116,7 @@ def get_fqdns_from_csv_file(csv_input_filename):
         "10674": lambda out: out.split("ServerName   : ")[1].split("\n")[0].strip().lower()
     }
 
+    # dict to store fqdns
     fqdn_dict = {}
 
     with open(csv_input_filename, "r", encoding="utf-8") as csv_input_file:
@@ -131,6 +132,7 @@ def get_fqdns_from_csv_file(csv_input_filename):
             plugin_output = row[header_idx["Plugin Output"]]
             host_plugins.setdefault(host, {})[plugin_id] = plugin_output
 
+    # ip regex
     ip_pattern = re.compile(r'\d{1,3}(\.\d{1,3}){3}')
 
     for host, plugins in host_plugins.items():
@@ -142,12 +144,12 @@ def get_fqdns_from_csv_file(csv_input_filename):
 
         if not ip_pattern.fullmatch(host):
             vprint(f"[+] {host} is already an fqdn, no need to search")
-            fqdn_dict[host] = host
+            fqdn_dict[host] = host.upper()
             continue
         else:
             vprint(f"[*] {host} is an IP")
 
-        found = False
+        fqdn_found = False
         # try plugins in priority order
         for plugin_id in ["42410", "12053","108761","35371","12218","10150","46180","45410","10800","10785", "42981", "83298", "66717", "10674"]:
             if plugin_id in plugins:
@@ -155,21 +157,20 @@ def get_fqdns_from_csv_file(csv_input_filename):
                 vprint(f"[*] Trying to get FQDN from plugin {plugin_id}...")
                 try:
                     fqdn = plugin_parsers[plugin_id](plugin_output)
-                    fqdn_dict[host] = fqdn
-                    found = True
+                except Exception as e:
+                    vprint(f"{BAD}[-] Failed to parse plugin {plugin_id} output: {e}{RST}")
+                    vprint(f"{INFO}[*] Raw plugin output:{RST}{BAD}{plugin_output}{RST}")
+                else:
+                    fqdn_dict[host] = fqdn.upper()
+                    fqdn_found = True
                     vprint(f"[+] Added {host} to fqdn dict: {fqdn}")
                     break
-                except Exception:
-                    vprint(f"{BAD}[-] Failed to parse plugin {plugin_id} output{RST}")
-                    vprint(f"{INFO}[*] Raw plugin output:{RST}")
-                    vprint(f"{BAD}{plugin_output}{RST}")
-                    input(f"{INFO}[*] Press a key to continue{RST}")
 
-        if not found:
+        if not fqdn_found:
             fqdn_dict[host] = "No FQDN identified"
             vprint(f"{BAD}[-] No FQDN identified for: {DETAIL}{host}{RST}")
 
-    # percentage
+    # get percentage of fqdns identified
     total = len(fqdn_dict)
     not_eq = sum(1 for x in fqdn_dict.values() if x != "No FQDN identified")
     percent = round((not_eq / total) * 100, 1) if total else 0
@@ -177,94 +178,22 @@ def get_fqdns_from_csv_file(csv_input_filename):
     return fqdn_dict, percent
 
 
-
-def create_csv_data_from_nessus_file(nessus_file):
-
-    print(f"{INFO}[*] Converting XML to CSV...{RST}")
-    soon_to_be_csv_list = []
-
-    header = f"Risk,Host,Port,Name,Description,Plugin Output"
-    soon_to_be_csv_list.append(header)
-
-    # open nessus file and parse the xml
-    tree = etree.parse(nessus_file)
-    root = tree.getroot()
-    report_hosts = root.findall('.//ReportHost')
-
-    # this loop is for getting all findings for all hosts
-    for report_host in report_hosts:
-        affected_host = report_host.attrib["name"]
-        ## vprint("------------------------------------------")
-        ## vprint(f"[*] Getting findings for:\t{affected_host}")
-        # now, find and loop through all the findings for this host
-        report_items = report_host.findall("ReportItem[@pluginName]")
-        for report_item in report_items:
-            # get the finding name
-            finding_name = report_item.get('pluginName')
-
-            # get the finding description
-            finding_description = ""
-            try:
-                finding_description = report_item.findall('description')[0].text
-                # replace newlines and tabs with spaces
-                finding_description = finding_description.replace("\n", " ")
-                finding_description = finding_description.replace("\t", " ")
-            except:
-                pass
-
-            # get the finding output
-            finding_output = ""
-            try:
-                finding_output = report_item.findall('plugin_output')[0].text
-                # a dodgy line to remove newlines for .csv format
-                finding_output = finding_output.replace("\n","!@#")
-                finding_output = finding_output.replace("\t", " ")
-            except:
-                pass
-
-            # get the finding port (the port on the host which is affected by this finding)
-            finding_port = ""
-            try:
-                finding_port = report_item.get('port')
-            except:
-                pass
-
-            # get the finding severity
-            finding_severity = ""
-            try:
-                # finding_severity = report_item.findall('risk_factor')[0].text
-                finding_severity = report_item.get('severity')
-                if finding_severity == "0":
-                    finding_severity = "None"
-                elif finding_severity == "1":
-                    finding_severity = "Low"
-                elif finding_severity == "2":
-                    finding_severity = "Medium"
-                elif finding_severity == "3":
-                    finding_severity = "High"
-                elif finding_severity == "4":
-                    finding_severity = "Critical"
-            except:
-                pass
-
-            # compile and append our soon to be csv line
-            soon_to_be_csv = f'"{finding_severity}","{affected_host}","{finding_port}","{finding_name}","{finding_description}","{finding_output}"'
-            soon_to_be_csv_list.append(soon_to_be_csv)
-
-    # >:(
-    csv_data = '\n'.join(soon_to_be_csv_list)
-    f = io.StringIO(csv_data)
-    reader = csv.reader(f)
-
-    # return csv data
-    return reader
+def get_csv_value(row, rows_index_dict, field_name, default="", replace_newlines=False):
+    try:
+        val = row[rows_index_dict[field_name]]
+        if replace_newlines:
+            val = val.replace("\n", " ").replace("\t", " ")
+        return val
+    except Exception as e:
+        vprint(f"{BAD}[-] Error reading {field_name}: {DETAIL}{e}{RST}")
+        return default
 
 
 def get_all_findings_from_csv_data(csv_data):
 
     print(f"{INFO}[*] Retrieving findings...{RST}")
     # used to return the number of hosts and findings at the finish line
-    host_list = []
+    host_set = set()
 
     # here we get list of all findings then trim it down later based on user options
     # eg if they want to remove info items
@@ -283,12 +212,12 @@ def get_all_findings_from_csv_data(csv_data):
 
     # get the header row to find our indexes
     header = next(csv_data)
-    rows_we_need = ["Risk", "Host", "Port", "Name", "Description", "Plugin Output"]
+    rows_we_need = ["Risk", "Host", "Port", "Name", "Description", "Plugin Output", "CVE"]
 
     # loop through to make sure we have all the required rows
     # add them to our rows index dict
     # just exit if we cant find the row, good enough
-    # vprint(f"{OTHER}[*] ROW CHECK")
+    vprint(f"{OTHER}[*] ROW CHECK")
     for header_row in rows_we_need:
         if header_row in header:
             # eg row_index = header.index("Risk")
@@ -304,180 +233,97 @@ def get_all_findings_from_csv_data(csv_data):
 
     # now we have the rows we need
     # we can get data from the rows
-    # vprint(f"{OTHER}[*] Getting findings data{RST}")
+    vprint(f"{OTHER}[*] Getting findings data{RST}")
+    severity_map = {
+        "None": "5 - Info",
+        "Low": "4 - Low",
+        "Medium": "3 - Medium",
+        "High": "2 - High",
+        "Critical": "1 - Critical"
+    }
+
     for csv_data_row in csv_data:
-        # vprint(f"{OTHER}[*] Row!{RST}")
-        # get finding severity
-        finding_severity = ""
-        try:
-            finding_severity = csv_data_row[rows_index_dict["Risk"]]
-            # change severity to the phrasing we need
-            if finding_severity == "None":
-                finding_severity = "5 - Info"
-            elif finding_severity == "Low":
-                finding_severity = "4 - Low"
-            elif finding_severity == "Medium":
-                finding_severity = "3 - Medium"
-            elif finding_severity == "High":
-                finding_severity = "2 - High"
-            elif finding_severity == "Critical":
-                finding_severity = "1 - Critical"
-        except Exception as e:
-            vprint(f"{BAD}[-] Error: {DETAIL}{e}{RST}")
-            quit()
-        
-        # get the description
-        finding_desc = ""
-        try:
-            finding_desc = csv_data_row[rows_index_dict['Description']].replace("\n", " ")
-        except Exception as e:
-            vprint(f"{BAD}[-] Error: {DETAIL}{e}{RST}")
-            quit()
+        # finding cve
+        finding_cve = csv_data_row[rows_index_dict['CVE']] if 'CVE' in rows_index_dict else ""
 
-        # get the host
-        finding_host = ""
-        try:
-            finding_host = csv_data_row[rows_index_dict['Host']]
-            # add host to host list
-            host_list.append(finding_host)
-        except Exception as e:
-            vprint(f"{BAD}[-] Error: {DETAIL}{e}{RST}")
-            quit()
+        # finding severity
+        finding_severity = csv_data_row[rows_index_dict["Risk"]]
+        finding_severity = severity_map.get(finding_severity, finding_severity)
 
-        # get the output
-        try:
-            finding_output = csv_data_row[rows_index_dict['Plugin Output']]
-        except Exception as e:
-            vprint(f"{BAD}[-] Error: {DETAIL}{e}{RST}")
-            quit()
-                                          
-        # make a string of the affected host and port
-        # so now we have a string like "192.168.0.1:445"
-        # we use that to check that against the findings "affected" list
-        finding_port = csv_data_row[rows_index_dict['Port']]
+        # finding description
+        finding_desc = csv_data_row[rows_index_dict['Description']] or ""
+        finding_desc = finding_desc.replace("\n", " ").replace("\t", " ")
+
+        # host
+        finding_host = csv_data_row[rows_index_dict['Host']] or ""
+        host_set.add(finding_host)
+
+        # plugin output
+        finding_output = csv_data_row[rows_index_dict['Plugin Output']] or ""
+
+        # port
+        finding_port = csv_data_row[rows_index_dict['Port']] or ""
         finding_host_and_port = f"{finding_host}:{finding_port}"
-    
-        # get finding name
-        finding_name = csv_data_row[rows_index_dict["Name"]]
+
+        # finding name
+        finding_name = csv_data_row[rows_index_dict["Name"]] or ""
         all_findings_list.append(finding_name)
+        entry = findings_and_affected_hosts_dict.setdefault(finding_name, {
+            "affected": [],
+            "description": finding_desc,
+            "severity": finding_severity,
+            "output": finding_output,
+            "cve": []  # now a list to store multiple CVEs
+        })
 
-        # this bit checks if the finding name is already in our 'seen before findings' list
-        # if we've seen this finding before
-        if finding_name in findings_seen_before:
-            vprint(f"{GOOD}[*] SEEN BEFORE: {DETAIL}{finding_name}{GOOD} - seen before{RST}") 
-            # now we check if the host and port from above is already in this findings 'affected' list
-            vprint(f"{INFO}\t[*] Checking if {DETAIL}{finding_host_and_port} {INFO}is in affected list for {DETAIL}{finding_name}{RST}")
-            # if it hasnt been added to the finding's affected list
-            # we add it
-            if finding_host_and_port not in findings_and_affected_hosts_dict[finding_name]["affected"]:
-                vprint(f"\t\t{INFO}[*] NO: {DETAIL}{finding_host_and_port} {INFO}is not in affected list, will add it{RST}")
-                findings_and_affected_hosts_dict[finding_name]["affected"].append(finding_host_and_port)
-            # if it has been added already
-            # do nothing
-            else:
-                vprint(f"\t\t{GOOD}[*] YES: {DETAIL}{finding_host_and_port} {INFO} is already in affected list, not adding it{RST}") 
-                pass
-                  
-        # if we havent seen this finding before
-        # create the finding then
-        # created the empty "affected" list within the finding dictionary
-        # add the host and port to its affected list
-        else:
-            vprint(f"{INFO}[*] NEVER SEEN: {DETAIL}{finding_name}{INFO} - adding it to found list{RST}")
-            findings_seen_before.append(finding_name)
-            # we've never seen this finding before, therefore the associated host and port
-            # hasn't been added to the affected list yet
-            # so we add it
-            # create empty entry for finding in findings dict
-            findings_and_affected_hosts_dict[finding_name] = {}
-            # create empty affected list
-            findings_and_affected_hosts_dict[finding_name]["affected"] = []
-            finding_host_and_port = f"{finding_host}:{finding_port}"
-            # add host and port to affected list
-            findings_and_affected_hosts_dict[finding_name]["affected"].append(finding_host_and_port)
-            vprint(f"\t{INFO}[*] {DETAIL}{finding_host_and_port} {INFO}will be first item in affected list{RST}")
+        # add CVE if not already present
+        if finding_cve and finding_cve not in entry["cve"]:
+            entry["cve"].append(finding_cve)
 
-        # complete the rest of the dictionary
-        findings_and_affected_hosts_dict[finding_name]["description"] = finding_desc
-        findings_and_affected_hosts_dict[finding_name]["severity"] = finding_severity
-        findings_and_affected_hosts_dict[finding_name]["output"] = finding_output
-
-    # create a unique list of findings sorted by severity as first order
-    # then finding name as second order
+        # add host/port if not already present
+        if finding_host_and_port not in entry["affected"]:
+            entry["affected"].append(finding_host_and_port)
+ 
     unique_findings_and_affected_hosts_dict = dict(sorted(findings_and_affected_hosts_dict.items(), key=lambda item: (item[1]["severity"], item[0].lower())))
 
-    return unique_findings_and_affected_hosts_dict, host_list, all_findings_list
+    return unique_findings_and_affected_hosts_dict, host_set, all_findings_list
 
 
-def trim_findings(findings_and_affected_dict, fqdn_dict, domain):
+def trim_findings(findings_and_affected_dict, fqdn_dict): # domain
 
     print(f"{INFO}[*] Trimming findings...{RST}")
-
-    # temp dict for shuffling things around
-    temp_working_dict = {}
 
     # dict to return when we've finished
     trimmed_findings_and_affected_hosts_dict = {}
 
-    # first, cut out items in our skipped findings list
     for finding, value in findings_and_affected_dict.items():
-        if finding not in skipped_findings:
-            trimmed_findings_and_affected_hosts_dict[finding] = value
-        else:
+        if finding in skipped_findings:
             vprint(f"{GOOD}[*] {DETAIL}{finding} {GOOD}is in skipped findings, not adding{RST}")
-            pass
-    
-    # now, cut out "info" items if -x hasn't been chosen
-    if args.info:
-        vprint(f"{INFO}[*] Info items are being included{RST}")
-        pass
-    else:
-        for key, value in trimmed_findings_and_affected_hosts_dict.items():
-            if value["severity"] == "5 - Info":
-                vprint(f"{OTHER} Removing item with severity: {DETAIL}{value['severity']}{RST}")
-                pass
-            else:
-                temp_working_dict[key] = value
-        trimmed_findings_and_affected_hosts_dict = temp_working_dict
+            continue
+        if not args.info and value["severity"] == "5 - Info":
+            vprint(f"{OTHER} Removing item with severity: {DETAIL}{value['severity']}{RST}")
+            continue
+        trimmed_findings_and_affected_hosts_dict[finding] = value
 
     for key, value in trimmed_findings_and_affected_hosts_dict.items():      
         # loop through list of affected hosts and ports
         for i in range(len(value["affected"])):
             finding_host_and_port = value["affected"][i]
-            host = finding_host_and_port.split(":")[0]
-            vprint(f"[*] Affected host: {host}")
-            port = finding_host_and_port.split(":")[1]
-            # if the host has an entry in the fqdn dict
-            # replace the ip value with the fqdn
-            for x, y in fqdn_dict.items():
-                found = False
-                new_value = ""
-                if host == x:
-                    vprint(f"[*] Found: {x} - {y}")
-                    #input()
-                    new_value = fqdn_dict[host]
-                    vprint(f"{GOOD}[+] Found {DETAIL}{host}{GOOD} in fqdn dict - {DETAIL}{new_value}{RST}")
-                    # update the list with the new value
-                    # if the new value is 'No FQDN identified', it means we couldnt find an FQDN
-                    if new_value == "No FQDN identified":
-                        vprint("[*] No FQDN was identified")
-                        vprint("")
-                        value["affected"][i] = f"{host}:{port} (No FQDN identified)"
-                    else:
-                        vprint("FQDN was identified")
-                        if args.domain:
-                            value["affected"][i] = f"{new_value}.{domain}:{port} ({host})"
-                        else:
-                            value["affected"][i] = f"{new_value}:{port} ({host})"   
-                        vprint("")                
-                    found = True
-                    break
-            # i dont know what happens when we get here...
-            if not found:
-                value["affected"][i] = f"{host}:{port} (No FQDN identified)"
-        # sorted affected hosts alphabetically
-        value['affected'] = sorted(value['affected'])
+            host, port = finding_host_and_port.split(":")
 
+            new_value = fqdn_dict.get(host, "No FQDN identified")
+
+            if new_value == "No FQDN identified":
+                value["affected"][i] = f"{host}:{port} (No FQDN identified)"
+            else:
+                # if args.domain:
+                #     value["affected"][i] = f"{new_value}.{domain}:{port} ({host})"
+                # else:
+                value["affected"][i] = f"{new_value}:{port} ({host})"
+ 
+    print("\n")
+    for value in trimmed_findings_and_affected_hosts_dict.values():
+        value["affected"].sort()
     return trimmed_findings_and_affected_hosts_dict    
 
 
@@ -507,12 +353,14 @@ def print_findings(trimmed_findings):
             high += 1
         elif severity == '1 - Critical':
             crit += 1
-        print(f"{INFO}[*] Severity:\t{DETAIL}{severity}{RST}")
-        print(f"{INFO}[*] Name:\t{DETAIL}{name}{RST}")
+        print(f"{INFO}[*] Severity:\t\t{DETAIL}{severity}{RST}")
+        print(f"{INFO}[*] Name:\t\t{DETAIL}{name}{RST}")
+        if args.cve and y["cve"]:
+            # join multiple CVEs with commas
+            print(f"{INFO}[*] CVE(s):\t\t{DETAIL}{', '.join(y['cve'])}{RST}")
         if args.desc:
-            description = y['description']
             # newline looks better than tab
-            print(f"{INFO}[*] Desc:\n{GREY}{description}{RST}")
+            print(f"{INFO}[*] Desc:\n{GREY}{y['description']}{RST}")
         # print output, recreate newlines
         # sorry
         if args.poutput:
@@ -525,11 +373,12 @@ def print_findings(trimmed_findings):
 
         #print affected
         affected = y["affected"]
-        affected.sort()
-        print(f"{GOOD}[*] Affected Hosts:{RST} {GREY}({len(affected)}){RST}")
+        print(f"{GOOD}[*] Affected Hosts:\t{RST}{DETAIL}{len(affected)}{RST}")
         for host in affected:
             if " (" in host:
                 fqdn = host.split(" (")[0]
+                if fqdn.endswith(":0"):
+                    fqdn = fqdn[:-2]
                 if args.ip:
                     ip = host.split(" (")[1]
                     ip = ip.split(")")[0]
@@ -537,6 +386,8 @@ def print_findings(trimmed_findings):
                 else:
                     print(f"{OTHER}{fqdn}{RST}") 
             else:
+                if host.endswith(":0"):
+                    host = host[:-2]
                 print(f"{OTHER}{host}{RST}")
         print("\n")
 
@@ -546,40 +397,41 @@ def print_findings(trimmed_findings):
 
 def write_findings(trimmed_findings):
 
-    # fancy stuff if "~" is in the output file line
-    output_file = args.output
-    if output_file.startswith("~"):
-        home_dir = os.path.expanduser("~")
-        output_file = home_dir + output_file[1:]
+    output_file = os.path.expanduser(args.output)
     
-    f = open(output_file, "w")
-    for x,y in trimmed_findings.items():
-        f.write(f"[*] Severity:\t{y['severity']}\n")
-        f.write(f"[*] Name:\t{x}\n")
-        if args.desc:
-            f.write(f"[*] Desc:\n{y['description']}\n")
-        if args.poutput:
-            f.write(f"[*] Output:\n")
-            output = y["output"]
-            output = output.replace("!@#", "\n")
-            output = output.strip()
-            f.write(f"{output}\n")
-        affected = y["affected"]
-        affected.sort()
-        f.write(f"[*] Affected Hosts: {len(affected)}\n")
-        for host in affected:
-            if " (" in host:
-                fqdn = host.split(" (")[0]
-                if args.ip:
-                    ip = host.split(" (")[1]
-                    ip = ip.split(")")[0]
-                    f.write(f"{fqdn} ({ip})\n")
+    with open(output_file, "w") as f:
+        for x,y in trimmed_findings.items():
+            f.write(f"[*] Severity:\t\t{y['severity']}\n")
+            f.write(f"[*] Name:\t\t{x}\n")
+            if args.cve and y["cve"]:
+                # join multiple CVEs with commas
+                f.write(f"[*] CVE(s):\t\t{', '.join(y['cve'])}\n")
+            if args.desc:
+                f.write(f"[*] Desc:\n{y['description']}\n")
+            if args.poutput:
+                f.write(f"[*] Output:\n")
+                output = y["output"]
+                output = output.replace("!@#", "\n")
+                output = output.strip()
+                f.write(f"{output}\n")
+            affected = y["affected"]
+            f.write(f"[*] Affected Hosts:\t{len(affected)}\n")
+            for host in affected:
+                if " (" in host:
+                    fqdn = host.split(" (")[0]
+                    if fqdn.endswith(":0"):
+                        fqdn = fqdn[:-2]
+                    if args.ip:
+                        ip = host.split(" (")[1]
+                        ip = ip.split(")")[0]
+                        f.write(f"{fqdn} ({ip})\n")
+                    else:
+                        f.write(f"{fqdn}\n")
                 else:
-                    f.write(f"{fqdn}\n")
-            else:
-                f.write(f"{host}\n")
-        f.write("\n")
-    f.close()
+                    if host.endswith(":0"):
+                        host = host[:-2]
+                    f.write(f"{host}\n")
+            f.write("\n")
 
 
 def summary(amt_of_hosts, amt_of_findings_including_skipped, amt_of_findings, info, low, med, high, crit, percent):
@@ -599,62 +451,50 @@ def summary(amt_of_hosts, amt_of_findings_including_skipped, amt_of_findings, in
 
 
 # main
-banner(nessus_file, output_file, domain)
+banner(nessus_file, output_file) # domain
 
 # find out what type of file we have
 extension = os.path.splitext(nessus_file)[1]
 
-# if csv
-if extension == ".csv":
-    # run the fqdn getter function
-    fqdn_dict, percent = get_fqdns_from_csv_file(nessus_file)
-    # sort the dict
-    sorted_fqdn_dict = dict(sorted(fqdn_dict.items()))
-    # then get the csv data
-    f = open(nessus_file, newline='', encoding='utf-8')
-    csv_data = csv.reader(f)
-
-# if nessus xml
-elif extension == ".nessus":
-    # run the fqdn getter function
-    fqdn_dict, percent = get_fqdns_from_nessus_file(nessus_file)
-    # sort the dict
-    sorted_fqdn_dict = dict(sorted(fqdn_dict.items()))
-    # convert nessus XML data into csv
-    csv_data = create_csv_data_from_nessus_file(nessus_file)
-# if neither
-else:
+# if not csv
+if extension != ".csv":
     print(f"{BAD}[-] Invalid file type: {DETAIL}{nessus_file}{RST}")
     quit(-1)
 
+# run the fqdn getter function
+fqdn_dict, percent = get_fqdns_from_csv_file(nessus_file)
+# sort the dict
+sorted_fqdn_dict = dict(sorted(fqdn_dict.items()))
+# then get the csv data
+with open(nessus_file, newline='', encoding='utf-8') as f:
+    csv_data = csv.reader(f)
 
-# get all of the findings and details from the csv data
-findings_and_affected_hosts_dict, host_list, all_findings_list = get_all_findings_from_csv_data(csv_data)
-
-
-# trim out the ones we dont need and stuff based on user prefs
-trimmed_findings = trim_findings(findings_and_affected_hosts_dict, sorted_fqdn_dict, domain)
-
-
-# get amount of findings for summary
-amt_of_findings = len(trimmed_findings) 
-
-
-# print the trimmed findings and return the amount
-# of findings for each risk level
-info, low, med, high, crit = print_findings(trimmed_findings)
+    # get all of the findings and details from the csv data
+    findings_and_affected_hosts_dict, host_set, all_findings_list = get_all_findings_from_csv_data(csv_data)
 
 
-# write to file
-write_findings(trimmed_findings)
+    # trim out the ones we dont need and stuff based on user prefs
+    # then sort it
+    trimmed_findings = trim_findings(findings_and_affected_hosts_dict, sorted_fqdn_dict) # domain
+
+    # get amount of findings for summary
+    amt_of_findings = len(trimmed_findings) 
 
 
-# get amount of hosts and findings for summary
-x = list(set(host_list))
-y = list(set(all_findings_list))
-amt_of_hosts = str(len(x))
-amt_of_findings_including_skipped = str(len(y))
+    # print the trimmed findings and return the amount
+    # of findings for each risk level
+    info, low, med, high, crit = print_findings(trimmed_findings)
 
 
-# print the summary
-summary(amt_of_hosts, amt_of_findings_including_skipped, amt_of_findings, info, low, med, high, crit, percent)
+    # write to file
+    write_findings(trimmed_findings)
+
+
+    # get amount of hosts and findings for summary
+    y = list(set(all_findings_list))
+    amt_of_hosts = str(len(host_set))
+    amt_of_findings_including_skipped = str(len(y))
+
+
+    # print the summary
+    summary(amt_of_hosts, amt_of_findings_including_skipped, amt_of_findings, info, low, med, high, crit, percent)
