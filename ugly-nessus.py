@@ -36,7 +36,7 @@ skipped_findings = {
 
 
 # args
-arg_parser = argparse.ArgumentParser(description='Export vulnerabilities from a Nessus .nessus or .csv file.')
+arg_parser = argparse.ArgumentParser(description='Export vulnerabilities from a Nessus .csv report file.')
 arg_parser.add_argument('-i', '--input', required=True, help='Input filename')
 arg_parser.add_argument('-o', '--output', required=True, help='Output filename')
 arg_parser.add_argument('-I', '--info', help='Include INFO items', action='store_true')
